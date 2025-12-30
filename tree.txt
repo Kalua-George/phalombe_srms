@@ -1,0 +1,39 @@
+.
+├── app
+│   ├── config
+│   │   └── connector.php
+│   ├── controllers
+│   │   ├── Attendancecontroller.php
+│   │   ├── Auth conttroller.php
+│   │   ├── departmentcontroller.php
+│   │   ├── Disciplinarycontroller.php
+│   │   ├── Examcontroller.php
+│   │   ├── headteachercontroller.php
+│   │   ├── HODcontroller.php
+│   │   ├── StudentController.php
+│   │   └── Teachercontroller.php
+│   ├── helpers
+│   ├── models
+│   │   ├── Attendance.php
+│   │   ├── Discipline.php
+│   │   ├── exam.php
+│   │   ├── Grade.php
+│   │   ├── student.php
+│   │   └── Teacher.php
+│   └── views
+├── public
+│   ├── assets
+│   ├── css
+│   ├── index.html
+│   ├── index.php
+│   ├── js
+│   ├── login.html
+│   ├── login.php
+│   └── logout.php
+├── routes
+├── storage
+│   ├── cache
+│   └── logs
+└── tree.txt
+
+15 directories, 22 files
