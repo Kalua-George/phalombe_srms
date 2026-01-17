@@ -1,206 +1,192 @@
 <?php
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/BaseModel.php';
 
-class Teacher {
-    private $conn;
+class Teacher extends BaseModel {
     private $table = 'teachers';
-    private $logs_table = 'logs';
 
-    // Teacher properties
     public $id;
     public $teacher_code;
     public $firstname;
     public $lastname;
     public $contact_no;
-    public $role;  // teacher, hod, head_teacher
+    public $role;          // teacher, hod, head_teacher
     public $department_id;
 
-    // Actor performing the action
-    public $user_id;
-
-    // Term + Year tracking
-    public $academic_year_id;
-    public $term_id;
-
     public function __construct($user_id = null, $academic_year_id = null, $term_id = null) {
-        $database = new Database();
-        $this->conn = $database->getConnection();
-
-        $this->user_id = $user_id;
-        $this->academic_year_id = $academic_year_id;
-        $this->term_id = $term_id;
+        parent::__construct($user_id, $academic_year_id, $term_id);
     }
 
-    // Log helper
-    private function logAction($action, $description = null) {
-        if(!$this->user_id) return;
-
-        $query = "INSERT INTO {$this->logs_table}
-                 (user_id, action, description, academic_year_id, term_id)
-                 VALUES (:user_id, :action, :description, :academic_year_id, :term_id)";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':user_id', $this->user_id, PDO::PARAM_INT);
-        $stmt->bindParam(':action', $action);
-        $stmt->bindParam(':description', $description);
-
-        $stmt->bindParam(':academic_year_id', $this->academic_year_id);
-        $stmt->bindParam(':term_id', $this->term_id);
-
-        $stmt->execute();
-    }
-
-    // Create teacher
+    // Create a new teacher
     public function create() {
-        $query = "INSERT INTO {$this->table}
-                  (teacher_code, firstname, lastname, contact_no, role, department_id)
-                  VALUES (:teacher_code, :firstname, :lastname, :contact_no, :role, :department_id)";
+        try {
+            $query = "INSERT INTO {$this->table} 
+                      (teacher_code, firstname, lastname, contact_no, role, department_id)
+                      VALUES (:teacher_code, :firstname, :lastname, :contact_no, :role, :department_id)";
+            $stmt = $this->conn->prepare($query);
+            $stmt->bindParam(':teacher_code', $this->teacher_code);
+            $stmt->bindParam(':firstname', $this->firstname);
+            $stmt->bindParam(':lastname', $this->lastname);
+            $stmt->bindParam(':contact_no', $this->contact_no);
+            $stmt->bindParam(':role', $this->role);
+            $stmt->bindParam(':department_id', $this->department_id);
 
-        $stmt = $this->conn->prepare($query);
-
-        $stmt->bindParam(':teacher_code', $this->teacher_code);
-        $stmt->bindParam(':firstname', $this->firstname);
-        $stmt->bindParam(':lastname', $this->lastname);
-        $stmt->bindParam(':contact_no', $this->contact_no);
-        $stmt->bindParam(':role', $this->role);
-        $stmt->bindParam(':department_id', $this->department_id);
-
-        if ($stmt->execute()) {
-            $this->id = $this->conn->lastInsertId();
-
-            $this->logAction("Create Teacher",
-                "Created teacher {$this->firstname} {$this->lastname} ({$this->teacher_code})");
-
-            return true;
+            if ($stmt->execute()) {
+                $this->id = $this->conn->lastInsertId();
+                $this->logAction("Create Teacher", "Created teacher {$this->firstname} {$this->lastname} ({$this->teacher_code})");
+                return true;
+            }
+        } catch (PDOException $e) {
+            error_log("Teacher Create Error: " . $e->getMessage());
         }
         return false;
     }
 
     // Update teacher
     public function update() {
-        $query = "UPDATE {$this->table} SET
-                  teacher_code = :teacher_code,
-                  firstname = :firstname,
-                  lastname = :lastname,
-                  contact_no = :contact_no,
-                  role = :role,
-                  department_id = :department_id
-                  WHERE id = :id";
+        try {
+            $query = "UPDATE {$this->table} SET
+                      teacher_code = :teacher_code,
+                      firstname = :firstname,
+                      lastname = :lastname,
+                      contact_no = :contact_no,
+                      role = :role,
+                      department_id = :department_id
+                      WHERE id = :id";
+            $stmt = $this->conn->prepare($query);
+            $stmt->bindParam(':teacher_code', $this->teacher_code);
+            $stmt->bindParam(':firstname', $this->firstname);
+            $stmt->bindParam(':lastname', $this->lastname);
+            $stmt->bindParam(':contact_no', $this->contact_no);
+            $stmt->bindParam(':role', $this->role);
+            $stmt->bindParam(':department_id', $this->department_id);
+            $stmt->bindParam(':id', $this->id, PDO::PARAM_INT);
 
-        $stmt = $this->conn->prepare($query);
-
-        $stmt->bindParam(':teacher_code', $this->teacher_code);
-        $stmt->bindParam(':firstname', $this->firstname);
-        $stmt->bindParam(':lastname', $this->lastname);
-        $stmt->bindParam(':contact_no', $this->contact_no);
-        $stmt->bindParam(':role', $this->role);
-        $stmt->bindParam(':department_id', $this->department_id);
-        $stmt->bindParam(':id', $this->id, PDO::PARAM_INT);
-
-        if ($stmt->execute()) {
-            $this->logAction("Update Teacher", "Updated Teacher ID {$this->id}");
-            return true;
+            if ($stmt->execute()) {
+                $this->logAction("Update Teacher", "Updated Teacher ID {$this->id}");
+                return true;
+            }
+        } catch (PDOException $e) {
+            error_log("Teacher Update Error: " . $e->getMessage());
         }
         return false;
     }
 
     // Delete teacher
     public function delete() {
-        $query = "DELETE FROM {$this->table} WHERE id = :id";
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':id', $this->id, PDO::PARAM_INT);
-
-        if ($stmt->execute()) {
-            $this->logAction("Delete Teacher", "Deleted Teacher ID {$this->id}");
-            return true;
+        try {
+            $stmt = $this->conn->prepare("DELETE FROM {$this->table} WHERE id = :id");
+            $stmt->bindParam(':id', $this->id, PDO::PARAM_INT);
+            if ($stmt->execute()) {
+                $this->logAction("Delete Teacher", "Deleted Teacher ID {$this->id}");
+                return true;
+            }
+        } catch (PDOException $e) {
+            error_log("Teacher Delete Error: " . $e->getMessage());
         }
         return false;
     }
 
-    // Get all teachers (JSON ready)
+    // Get all teachers
     public function getAll() {
-        $query = "SELECT t.*, d.name AS department_name
-                  FROM {$this->table} t
-                  LEFT JOIN departments d ON t.department_id = d.id
-                  ORDER BY t.lastname ASC";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->execute();
-
-        return json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        try {
+            $stmt = $this->conn->prepare(
+                "SELECT t.*, d.name AS department_name
+                 FROM {$this->table} t
+                 LEFT JOIN departments d ON t.department_id = d.id
+                 ORDER BY t.lastname ASC"
+            );
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Teacher GetAll Error: " . $e->getMessage());
+            return [];
+        }
     }
 
     // Get teacher by ID
     public function getById($id) {
-        $query = "SELECT t.*, d.name AS department_name
-                  FROM {$this->table} t
-                  LEFT JOIN departments d ON t.department_id = d.id
-                  WHERE t.id = :id LIMIT 1";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':id', $id, PDO::PARAM_INT);
-        $stmt->execute();
-
-        return json_encode($stmt->fetch(PDO::FETCH_ASSOC));
-    }
-
-    // SUBJECTS + CLASSES =======================================
-
-    public function getClasses() {
-        $query = "SELECT c.*
-                  FROM teacher_classes tc
-                  JOIN classes c ON tc.class_id = c.id
-                  WHERE tc.teacher_id = :teacher_id";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':teacher_id', $this->id, PDO::PARAM_INT);
-        $stmt->execute();
-
-        return json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-    }
-
-    public function getSubjects() {
-        $query = "SELECT s.*
-                  FROM teacher_subjects ts
-                  JOIN subjects s ON ts.subject_id = s.id
-                  WHERE ts.teacher_id = :teacher_id";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':teacher_id', $this->id, PDO::PARAM_INT);
-        $stmt->execute();
-
-        return json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        try {
+            $stmt = $this->conn->prepare(
+                "SELECT t.*, d.name AS department_name
+                 FROM {$this->table} t
+                 LEFT JOIN departments d ON t.department_id = d.id
+                 WHERE t.id = :id
+                 LIMIT 1"
+            );
+            $stmt->bindParam(':id', $id, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Teacher GetById Error: " . $e->getMessage());
+            return null;
+        }
     }
 
     // Assign class
     public function assignClass($class_id) {
-        $query = "INSERT IGNORE INTO teacher_classes (teacher_id, class_id)
-                  VALUES (:teacher_id, :class_id)";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':teacher_id', $this->id);
-        $stmt->bindParam(':class_id', $class_id);
-
-        if ($stmt->execute()) {
-            $this->logAction("Assign Class", "Class {$class_id} → Teacher {$this->id}");
-            return true;
+        try {
+            $stmt = $this->conn->prepare("INSERT IGNORE INTO teacher_classes (teacher_id, class_id) VALUES (:teacher_id, :class_id)");
+            $stmt->bindParam(':teacher_id', $this->id);
+            $stmt->bindParam(':class_id', $class_id);
+            if ($stmt->execute()) {
+                $this->logAction("Assign Class", "Class {$class_id} → Teacher {$this->id}");
+                return true;
+            }
+        } catch (PDOException $e) {
+            error_log("Teacher AssignClass Error: " . $e->getMessage());
         }
         return false;
     }
 
     // Assign subject
     public function assignSubject($subject_id) {
-        $query = "INSERT IGNORE INTO teacher_subjects (teacher_id, subject_id)
-                  VALUES (:teacher_id, :subject_id)";
-
-        $stmt = $this->conn->prepare($query);
-        $stmt->bindParam(':teacher_id', $this->id);
-        $stmt->bindParam(':subject_id', $subject_id);
-
-        if ($stmt->execute()) {
-            $this->logAction("Assign Subject", "Subject {$subject_id} → Teacher {$this->id}");
-            return true;
+        try {
+            $stmt = $this->conn->prepare("INSERT IGNORE INTO teacher_subjects (teacher_id, subject_id) VALUES (:teacher_id, :subject_id)");
+            $stmt->bindParam(':teacher_id', $this->id);
+            $stmt->bindParam(':subject_id', $subject_id);
+            if ($stmt->execute()) {
+                $this->logAction("Assign Subject", "Subject {$subject_id} → Teacher {$this->id}");
+                return true;
+            }
+        } catch (PDOException $e) {
+            error_log("Teacher AssignSubject Error: " . $e->getMessage());
         }
         return false;
+    }
+
+    // Get classes assigned to teacher
+    public function getClasses() {
+        try {
+            $stmt = $this->conn->prepare(
+                "SELECT c.* 
+                 FROM teacher_classes tc
+                 JOIN classes c ON tc.class_id = c.id
+                 WHERE tc.teacher_id = :teacher_id"
+            );
+            $stmt->bindParam(':teacher_id', $this->id, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Teacher GetClasses Error: " . $e->getMessage());
+            return [];
+        }
+    }
+
+    // Get subjects assigned to teacher
+    public function getSubjects() {
+        try {
+            $stmt = $this->conn->prepare(
+                "SELECT s.*
+                 FROM teacher_subjects ts
+                 JOIN subjects s ON ts.subject_id = s.id
+                 WHERE ts.teacher_id = :teacher_id"
+            );
+            $stmt->bindParam(':teacher_id', $this->id, PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log("Teacher GetSubjects Error: " . $e->getMessage());
+            return [];
+        }
     }
 }

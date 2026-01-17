@@ -1,0 +1,11 @@
+Attendancecontroller.php
+Authconttroller.php
+BaseController.php
+controller.txt
+departmentcontroller.php
+Disciplinarycontroller.php
+Examcontroller.php
+headteachercontroller.php
+HODcontroller.php
+StudentController.php
+Teachercontroller.php

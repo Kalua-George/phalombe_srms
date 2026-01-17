@@ -1,134 +1,149 @@
 <?php
-
+require_once __DIR__ . '/BaseController.php';
 require_once __DIR__ . '/../models/Student.php';
 
-class StudentController
+class StudentController extends BaseController
 {
-    // GET /students
-    public function index()
+    // GET /api/students
+    public function index(): void
     {
-        $student = new Student();
-        $result = $student->getAll();
+        $this->requireAuth();
 
-        echo json_encode([
-            "status" => "success",
-            "data" => $result
-        ]);
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $rows = $m->getAll();
+
+        $this->json(['ok' => true, 'data' => $rows]);
     }
 
-    // GET /students/{id}
-    public function show($id)
+    // GET /api/students/show?id=1
+    public function show(): void
     {
-        $student = new Student();
-        $data = $student->getById($id);
+        $this->requireAuth();
 
-        if ($data) {
-            echo json_encode([
-                "status" => "success",
-                "data" => $data
-            ]);
-        } else {
-            http_response_code(404);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Student not found"
-            ]);
-        }
+        $id = (int)($_GET['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $row = $m->getById($id);
+
+        if (!$row) $this->json(['ok' => false, 'error' => 'Student not found'], 404);
+
+        $this->json(['ok' => true, 'data' => $row]);
     }
 
-    // POST /students
-    public function store()
+    // POST /api/students/create
+    public function create(): void
     {
-        $input = json_decode(file_get_contents("php://input"), true);
+        // Headteacher manages core structure; allow HOD too if you want:
+        $this->requireRole(['head_teacher']);
 
-        $student = new Student();
+        $data = $this->request();
 
-        $student->student_code      = $input['student_code'] ?? null;
-        $student->firstname         = $input['firstname'] ?? null;
-        $student->lastname          = $input['lastname'] ?? null;
-        $student->gender            = $input['gender'] ?? null;
-        $student->dob               = $input['dob'] ?? null;
-        $student->class_id          = $input['class_id'] ?? null;
-        $student->contact_no        = $input['contact_no'] ?? null; 
-        $student->academic_year_id  = $input['academic_year_id'] ?? null;
-        $student->term_id           = $input['term_id'] ?? null;
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $m->student_code    = $data['student_code'] ?? null;
+        $m->fname           = trim((string)($data['fname'] ?? ''));
+        $m->lname           = trim((string)($data['lname'] ?? ''));
+        $m->class_id        = (int)($data['class_id'] ?? 0);
+        $m->form_id         = (int)($data['form_id'] ?? 0);
+        $m->dob             = $data['dob'] ?? null;
+        $m->home            = $data['home'] ?? null;
+        $m->parent_contact  = $data['parent_contact'] ?? null;
 
-        if ($student->create()) {
-            echo json_encode([
-                "status" => "success",
-                "message" => "Student created successfully",
-                "id" => $student->id
-            ]);
-        } else {
-            http_response_code(500);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Failed to create student (Duplicate student_code?)"
-            ]);
+        // ensure term/year stored (your model expects these columns exist)
+        $m->academic_year_id = $this->yearId();
+        $m->term_id          = $this->termId();
+
+        if ($m->fname === '' || $m->lname === '' || $m->class_id <= 0 || $m->form_id <= 0) {
+            $this->json(['ok' => false, 'error' => 'fname, lname, class_id, form_id are required'], 400);
         }
+
+        if ($m->create()) {
+            $this->json(['ok' => true, 'id' => $m->id]);
+        }
+
+        $this->json(['ok' => false, 'error' => 'Failed to create student'], 500);
     }
 
-    // PUT /students/{id}
-    public function update($id)
+    // POST /api/students/update
+    public function update(): void
     {
-        $input = json_decode(file_get_contents("php://input"), true);
+        $this->requireRole(['head_teacher']);
 
-        $student = new Student();
-        $existing = $student->getById($id);
+        $data = $this->request();
+        $id = (int)($data['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
 
-        if (!$existing) {
-            http_response_code(404);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Student not found"
-            ]);
-            return;
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $m->id             = $id;
+        $m->student_code   = $data['student_code'] ?? null;
+        $m->fname          = trim((string)($data['fname'] ?? ''));
+        $m->lname          = trim((string)($data['lname'] ?? ''));
+        $m->class_id       = (int)($data['class_id'] ?? 0);
+        $m->form_id        = (int)($data['form_id'] ?? 0);
+        $m->dob            = $data['dob'] ?? null;
+        $m->home           = $data['home'] ?? null;
+        $m->parent_contact = $data['parent_contact'] ?? null;
+
+        $m->academic_year_id = $this->yearId();
+        $m->term_id          = $this->termId();
+
+        if ($m->fname === '' || $m->lname === '' || $m->class_id <= 0 || $m->form_id <= 0) {
+            $this->json(['ok' => false, 'error' => 'fname, lname, class_id, form_id are required'], 400);
         }
 
-        // keep existing values if not passed
-        $student->id               = $id;
-        $student->student_code     = $input['student_code'] ?? $existing['student_code'];
-        $student->firstname        = $input['firstname'] ?? $existing['firstname'];
-        $student->lastname         = $input['lastname'] ?? $existing['lastname'];
-        $student->gender           = $input['gender'] ?? $existing['gender'];
-        $student->dob              = $input['dob'] ?? $existing['dob'];
-        $student->class_id         = $input['class_id'] ?? $existing['class_id'];
-        $student->contact_no       = $input['contact_no'] ?? $existing['contact_no'];
-        $student->academic_year_id = $input['academic_year_id'] ?? $existing['academic_year_id'];
-        $student->term_id          = $input['term_id'] ?? $existing['term_id'];
-
-        if ($student->update()) {
-            echo json_encode([
-                "status" => "success",
-                "message" => "Student updated successfully"
-            ]);
-        } else {
-            http_response_code(500);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Failed to update student"
-            ]);
+        if ($m->update()) {
+            $this->json(['ok' => true]);
         }
+
+        $this->json(['ok' => false, 'error' => 'Failed to update student'], 500);
     }
 
-    // DELETE /students/{id}
-    public function destroy($id)
+    // POST /api/students/delete
+    public function delete(): void
     {
-        $student = new Student();
-        $student->id = $id;
+        $this->requireRole(['head_teacher']);
 
-        if ($student->delete()) {
-            echo json_encode([
-                "status" => "success",
-                "message" => "Student deleted"
-            ]);
-        } else {
-            http_response_code(500);
-            echo json_encode([
-                "status" => "error",
-                "message" => "Failed to delete student"
-            ]);
+        $data = $this->request();
+        $id = (int)($data['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $id;
+
+        if ($m->delete()) {
+            $this->json(['ok' => true]);
         }
+
+        $this->json(['ok' => false, 'error' => 'Failed to delete student'], 500);
+    }
+
+    // GET /api/students/attendance?id=1
+    public function attendance(): void
+    {
+        $this->requireAuth();
+
+        $id = (int)($_GET['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $id;
+
+        $rows = $m->getAttendance();
+        $this->json(['ok' => true, 'data' => $rows]);
+    }
+
+    // GET /api/students/grades?id=1
+    public function grades(): void
+    {
+        $this->requireAuth();
+
+        $id = (int)($_GET['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Student($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $id;
+
+        $rows = $m->getGrades();
+        $this->json(['ok' => true, 'data' => $rows]);
     }
 }
-
