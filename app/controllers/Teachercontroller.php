@@ -1,193 +1,402 @@
 <?php
 require_once __DIR__ . '/BaseController.php';
+require_once __DIR__ . '/../models/Teacher.php';
 
-class AttendanceController extends BaseController
+class TeacherController extends BaseController
 {
-    // GET /api/attendance/students?class_id=1
-    // returns students in that class (for marking attendance UI)
-    public function studentsByClass(): void
+    // =========================
+    // GET /api/teachers
+    // head_teacher: all teachers
+    // hod: teachers in their department
+    // teacher: self only
+    // =========================
+    public function index(): void
     {
         $this->requireAuth();
 
-        $classId = (int)($_GET['class_id'] ?? 0);
-        if ($classId <= 0) $this->json(['ok' => false, 'error' => 'Invalid class_id'], 400);
+        $pdo  = $this->pdo();
+        $role = $this->role();
+        $uid  = $this->userId();
 
-        // teacher must be assigned to the class
-        if ($this->role() === 'teacher' && !$this->teacherHasClass($this->userId(), $classId)) {
+        if ($role === 'head_teacher') {
+            $stmt = $pdo->query("
+                SELECT t.*, d.name AS department_name
+                FROM teachers t
+                LEFT JOIN departments d ON t.department_id = d.id
+                ORDER BY t.lastname ASC
+            ");
+            $this->json(['ok' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        }
+
+        if ($role === 'hod') {
+            $deptId = $this->hodDepartmentId($uid);
+            if (!$deptId) $this->json(['ok' => true, 'data' => []]);
+
+            $stmt = $pdo->prepare("
+                SELECT t.*, d.name AS department_name
+                FROM teachers t
+                LEFT JOIN departments d ON t.department_id = d.id
+                WHERE t.department_id = :dept
+                ORDER BY t.lastname ASC
+            ");
+            $stmt->execute([':dept' => $deptId]);
+            $this->json(['ok' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        }
+
+        // teacher
+        $stmt = $pdo->prepare("
+            SELECT t.*, d.name AS department_name
+            FROM teachers t
+            LEFT JOIN departments d ON t.department_id = d.id
+            WHERE t.id = :id
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $uid]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->json(['ok' => true, 'data' => $row ? [$row] : []]);
+    }
+
+    // =========================
+    // GET /api/teachers/show?id=1
+    // head_teacher: any
+    // hod: dept only
+    // teacher: self only
+    // =========================
+    public function show(): void
+    {
+        $this->requireAuth();
+
+        $id = (int)($_GET['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $pdo  = $this->pdo();
+        $role = $this->role();
+        $uid  = $this->userId();
+
+        if ($role === 'teacher' && $id !== $uid) {
             $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
         }
 
-        $pdo = $this->pdo();
-        $stmt = $pdo->prepare("SELECT id, student_code, fname, lname
-                               FROM students
-                               WHERE class_id = :class_id
-                               ORDER BY lname ASC, fname ASC");
-        $stmt->execute([':class_id' => $classId]);
+        if ($role === 'hod') {
+            $deptId = $this->hodDepartmentId($uid);
+            $stmt = $pdo->prepare("SELECT 1 FROM teachers WHERE id=:id AND department_id=:dept LIMIT 1");
+            $stmt->execute([':id' => $id, ':dept' => $deptId]);
+            if (!$stmt->fetchColumn()) $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+        }
 
-        $this->json(['ok' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        $stmt = $pdo->prepare("
+            SELECT t.*, d.name AS department_name
+            FROM teachers t
+            LEFT JOIN departments d ON t.department_id = d.id
+            WHERE t.id = :id
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) $this->json(['ok' => false, 'error' => 'Teacher not found'], 404);
+
+        $this->json(['ok' => true, 'data' => $row]);
     }
 
-    // POST /api/attendance/mark
-    // body:
-    //  class_id, attendance_date (YYYY-MM-DD)
-    //  records: array of { student_id, status }  where status in: present|absent|late|excused
-    public function mark(): void
+    // =========================
+    // POST /api/teachers/create
+    // head_teacher only
+    // =========================
+    public function create(): void
     {
-        $this->requireAuth();
+        $this->requireRole(['head_teacher']);
 
         $data = $this->request();
 
-        $classId = (int)($data['class_id'] ?? 0);
-        $date    = trim((string)($data['attendance_date'] ?? ''));
-        $records = $data['records'] ?? null;
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->teacher_code  = $data['teacher_code'] ?? null;
+        $m->firstname     = trim((string)($data['firstname'] ?? ''));
+        $m->lastname      = trim((string)($data['lastname'] ?? ''));
+        $m->contact_no    = $data['contact_no'] ?? null;
+        $m->role          = $data['role'] ?? 'teacher'; // teacher|hod|head_teacher
+        $m->department_id = isset($data['department_id']) && $data['department_id'] !== '' ? (int)$data['department_id'] : null;
 
-        if ($classId <= 0 || $date === '' || !is_array($records) || count($records) === 0) {
-            $this->json(['ok' => false, 'error' => 'class_id, attendance_date, records[] required'], 400);
+        if ($m->firstname === '' || $m->lastname === '') {
+            $this->json(['ok' => false, 'error' => 'firstname and lastname are required'], 400);
         }
 
-        // teacher must be assigned to the class
-        if ($this->role() === 'teacher' && !$this->teacherHasClass($this->userId(), $classId)) {
-            $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+        if ($m->create()) {
+            $this->json(['ok' => true, 'id' => (int)$m->id]);
         }
 
-        $yearId = $this->yearId();
-        $termId = $this->termId();
-
-        if ($yearId === null || $termId === null) {
-            $this->json(['ok' => false, 'error' => 'Academic year/term not set in session'], 400);
-        }
-
-        // Validate statuses
-        $allowed = ['present','absent','late','excused'];
-
-        $pdo = $this->pdo();
-        $pdo->beginTransaction();
-
-        try {
-            // Upsert based on UNIQUE(student_id, class_id, attendance_date, academic_year_id, term_id)
-            $sql = "INSERT INTO attendance
-                    (student_id, class_id, attendance_date, academic_year_id, term_id, status, marked_by)
-                    VALUES
-                    (:student_id, :class_id, :attendance_date, :academic_year_id, :term_id, :status, :marked_by)
-                    ON DUPLICATE KEY UPDATE
-                        status = VALUES(status),
-                        marked_by = VALUES(marked_by)";
-
-            $stmt = $pdo->prepare($sql);
-
-            $count = 0;
-            foreach ($records as $r) {
-                $studentId = (int)($r['student_id'] ?? 0);
-                $status    = strtolower(trim((string)($r['status'] ?? '')));
-
-                if ($studentId <= 0 || !in_array($status, $allowed, true)) {
-                    continue;
-                }
-
-                // ensure student belongs to class (prevent cross-class marking)
-                $st = $pdo->prepare("SELECT 1 FROM students WHERE id=:sid AND class_id=:cid LIMIT 1");
-                $st->execute([':sid' => $studentId, ':cid' => $classId]);
-                if (!$st->fetchColumn()) {
-                    continue;
-                }
-
-                $stmt->execute([
-                    ':student_id' => $studentId,
-                    ':class_id' => $classId,
-                    ':attendance_date' => $date,
-                    ':academic_year_id' => $yearId,
-                    ':term_id' => $termId,
-                    ':status' => $status,
-                    ':marked_by' => $this->userId(),
-                ]);
-
-                $count++;
-            }
-
-            $pdo->commit();
-            $this->json(['ok' => true, 'message' => 'Attendance saved', 'saved' => $count]);
-        } catch (Throwable $e) {
-            $pdo->rollBack();
-            $this->json(['ok' => false, 'error' => 'Failed to save attendance'], 500);
-        }
+        $this->json(['ok' => false, 'error' => 'Failed to create teacher'], 500);
     }
 
-    // GET /api/attendance/by-class-date?class_id=1&date=2026-01-15
-    public function byClassAndDate(): void
+    // =========================
+    // POST /api/teachers/update
+    // head_teacher only
+    // =========================
+    public function update(): void
+    {
+        $this->requireRole(['head_teacher']);
+
+        $data = $this->request();
+        $id = (int)($data['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id           = $id;
+        $m->teacher_code = $data['teacher_code'] ?? null;
+        $m->firstname    = trim((string)($data['firstname'] ?? ''));
+        $m->lastname     = trim((string)($data['lastname'] ?? ''));
+        $m->contact_no   = $data['contact_no'] ?? null;
+        $m->role         = $data['role'] ?? 'teacher';
+        $m->department_id = isset($data['department_id']) && $data['department_id'] !== '' ? (int)$data['department_id'] : null;
+
+        if ($m->firstname === '' || $m->lastname === '') {
+            $this->json(['ok' => false, 'error' => 'firstname and lastname are required'], 400);
+        }
+
+        if ($m->update()) {
+            $this->json(['ok' => true]);
+        }
+
+        $this->json(['ok' => false, 'error' => 'Failed to update teacher'], 500);
+    }
+
+    // =========================
+    // POST /api/teachers/delete
+    // head_teacher only
+    // =========================
+    public function delete(): void
+    {
+        $this->requireRole(['head_teacher']);
+
+        $data = $this->request();
+        $id = (int)($data['id'] ?? 0);
+        if ($id <= 0) $this->json(['ok' => false, 'error' => 'Invalid id'], 400);
+
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $id;
+
+        if ($m->delete()) {
+            $this->json(['ok' => true]);
+        }
+
+        $this->json(['ok' => false, 'error' => 'Failed to delete teacher'], 500);
+    }
+
+    // =========================
+    // GET /api/teachers/classes?teacher_id=1
+    // teacher: self only
+    // hod: only teachers in their dept
+    // head_teacher: any
+    // =========================
+    public function classes(): void
     {
         $this->requireAuth();
 
-        $classId = (int)($_GET['class_id'] ?? 0);
-        $date    = trim((string)($_GET['date'] ?? ''));
+        $teacherId = (int)($_GET['teacher_id'] ?? $this->userId());
+        if ($teacherId <= 0) $this->json(['ok' => false, 'error' => 'Invalid teacher_id'], 400);
 
-        if ($classId <= 0 || $date === '') {
-            $this->json(['ok' => false, 'error' => 'class_id and date required'], 400);
-        }
+        $role = $this->role();
+        $uid  = $this->userId();
 
-        // teacher must be assigned to the class
-        if ($this->role() === 'teacher' && !$this->teacherHasClass($this->userId(), $classId)) {
+        if ($role === 'teacher' && $teacherId !== $uid) {
             $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
         }
 
-        $yearId = $this->yearId();
-        $termId = $this->termId();
+        if ($role === 'hod' && $teacherId !== $uid) {
+            $pdo = $this->pdo();
+            $deptId = $this->hodDepartmentId($uid);
+            $stmt = $pdo->prepare("SELECT 1 FROM teachers WHERE id=:tid AND department_id=:dept LIMIT 1");
+            $stmt->execute([':tid' => $teacherId, ':dept' => $deptId]);
+            if (!$stmt->fetchColumn()) $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+        }
 
-        $pdo = $this->pdo();
-        $stmt = $pdo->prepare("
-            SELECT a.id, a.student_id, a.class_id, a.attendance_date, a.status, a.marked_by,
-                   s.student_code, s.fname, s.lname
-            FROM attendance a
-            JOIN students s ON s.id = a.student_id
-            WHERE a.class_id = :class_id
-              AND a.attendance_date = :dt
-              AND a.academic_year_id = :year
-              AND a.term_id = :term
-            ORDER BY s.lname ASC, s.fname ASC
-        ");
-        $stmt->execute([
-            ':class_id' => $classId,
-            ':dt' => $date,
-            ':year' => $yearId,
-            ':term' => $termId
-        ]);
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $teacherId;
 
-        $this->json(['ok' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        // model returns JSON string
+        $data = json_decode($m->getClasses(), true);
+        $this->json(['ok' => true, 'data' => $data ?? []]);
     }
 
-    // GET /api/attendance/by-student?id=5
-    public function byStudent(): void
+    // =========================
+    // GET /api/teachers/subjects?teacher_id=1
+    // teacher: self only
+    // hod: only teachers in their dept
+    // head_teacher: any
+    // =========================
+    public function subjects(): void
     {
         $this->requireAuth();
 
-        $studentId = (int)($_GET['id'] ?? 0);
-        if ($studentId <= 0) $this->json(['ok' => false, 'error' => 'Invalid student id'], 400);
+        $teacherId = (int)($_GET['teacher_id'] ?? $this->userId());
+        if ($teacherId <= 0) $this->json(['ok' => false, 'error' => 'Invalid teacher_id'], 400);
 
-        // teachers can only view students in their classes
-        if ($this->role() === 'teacher') {
-            $classId = $this->studentClassId($studentId);
-            if (!$classId || !$this->teacherHasClass($this->userId(), (int)$classId)) {
+        $role = $this->role();
+        $uid  = $this->userId();
+
+        if ($role === 'teacher' && $teacherId !== $uid) {
+            $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+        }
+
+        if ($role === 'hod' && $teacherId !== $uid) {
+            $pdo = $this->pdo();
+            $deptId = $this->hodDepartmentId($uid);
+            $stmt = $pdo->prepare("SELECT 1 FROM teachers WHERE id=:tid AND department_id=:dept LIMIT 1");
+            $stmt->execute([':tid' => $teacherId, ':dept' => $deptId]);
+            if (!$stmt->fetchColumn()) $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+        }
+
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $teacherId;
+
+        $data = json_decode($m->getSubjects(), true);
+        $this->json(['ok' => true, 'data' => $data ?? []]);
+    }
+
+    // =========================
+    // POST /api/teachers/assign-class
+    // head_teacher OR hod (hod limited to their department)
+    // body: teacher_id, class_id
+    // =========================
+    public function assignClass(): void
+    {
+        $this->requireRole(['head_teacher', 'hod']);
+
+        $data = $this->request();
+        $teacherId = (int)($data['teacher_id'] ?? 0);
+        $classId   = (int)($data['class_id'] ?? 0);
+
+        if ($teacherId <= 0 || $classId <= 0) {
+            $this->json(['ok' => false, 'error' => 'teacher_id and class_id are required'], 400);
+        }
+
+        if ($this->role() === 'hod') {
+            $pdo = $this->pdo();
+            $deptId = $this->hodDepartmentId($this->userId());
+            if (!$deptId) $this->json(['ok' => false, 'error' => 'HOD department not found'], 403);
+
+            $stmt = $pdo->prepare("SELECT 1 FROM teachers WHERE id=:tid AND department_id=:dept LIMIT 1");
+            $stmt->execute([':tid' => $teacherId, ':dept' => $deptId]);
+            if (!$stmt->fetchColumn()) {
                 $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
             }
         }
 
-        $yearId = $this->yearId();
-        $termId = $this->termId();
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $teacherId;
+
+        if ($m->assignClass($classId)) {
+            $this->json(['ok' => true]);
+        }
+
+        $this->json(['ok' => false, 'error' => 'Failed to assign class'], 500);
+    }
+
+    // =========================
+    // POST /api/teachers/assign-subject
+    // head_teacher OR hod (hod limited to their department)
+    // body: teacher_id, subject_id
+    // =========================
+    public function assignSubject(): void
+    {
+        $this->requireRole(['head_teacher', 'hod']);
+
+        $data = $this->request();
+        $teacherId = (int)($data['teacher_id'] ?? 0);
+        $subjectId = (int)($data['subject_id'] ?? 0);
+
+        if ($teacherId <= 0 || $subjectId <= 0) {
+            $this->json(['ok' => false, 'error' => 'teacher_id and subject_id are required'], 400);
+        }
+
+        if ($this->role() === 'hod') {
+            $pdo = $this->pdo();
+            $deptId = $this->hodDepartmentId($this->userId());
+            if (!$deptId) $this->json(['ok' => false, 'error' => 'HOD department not found'], 403);
+
+            $stmt = $pdo->prepare("SELECT 1 FROM teachers WHERE id=:tid AND department_id=:dept LIMIT 1");
+            $stmt->execute([':tid' => $teacherId, ':dept' => $deptId]);
+            if (!$stmt->fetchColumn()) {
+                $this->json(['ok' => false, 'error' => 'Forbidden'], 403);
+            }
+        }
+
+        $m = new Teacher($this->userId(), $this->yearId(), $this->termId());
+        $m->id = $teacherId;
+
+        if ($m->assignSubject($subjectId)) {
+            $this->json(['ok' => true]);
+        }
+
+        $this->json(['ok' => false, 'error' => 'Failed to assign subject'], 500);
+    }
+
+    // =========================
+    // GET /api/teachers/dashboard
+    // Any logged-in teacher/hod/head_teacher can call,
+    // but it returns "my" data based on session user
+    // =========================
+    public function dashboard(): void
+    {
+        $this->requireAuth();
 
         $pdo = $this->pdo();
-        $stmt = $pdo->prepare("
-            SELECT id, student_id, class_id, attendance_date, status, marked_by
-            FROM attendance
-            WHERE student_id = :sid
-              AND academic_year_id = :year
-              AND term_id = :term
-            ORDER BY attendance_date DESC
-        ");
-        $stmt->execute([
-            ':sid' => $studentId,
-            ':year' => $yearId,
-            ':term' => $termId
-        ]);
+        $teacherId = $this->userId();
+        $today = date('Y-m-d');
 
-        $this->json(['ok' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        // My classes
+        $stmt = $pdo->prepare("
+            SELECT c.id, c.name, c.form_id
+            FROM teacher_classes tc
+            JOIN classes c ON c.id = tc.class_id
+            WHERE tc.teacher_id = :tid
+            ORDER BY c.form_id ASC, c.name ASC
+        ");
+        $stmt->execute([':tid' => $teacherId]);
+        $classes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // My subjects
+        $stmt = $pdo->prepare("
+            SELECT s.id, s.name
+            FROM teacher_subjects ts
+            JOIN subjects s ON s.id = ts.subject_id
+            WHERE ts.teacher_id = :tid
+            ORDER BY s.name ASC
+        ");
+        $stmt->execute([':tid' => $teacherId]);
+        $subjects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Attendance marked today per class (by this teacher)
+        $attendanceToday = [];
+        foreach ($classes as $c) {
+            $st = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM attendance
+                WHERE class_id = :cid AND attendance_date = :dt AND marked_by = :tid
+            ");
+            $st->execute([':cid' => $c['id'], ':dt' => $today, ':tid' => $teacherId]);
+            $count = (int)$st->fetchColumn();
+
+            $attendanceToday[] = [
+                'class_id' => (int)$c['id'],
+                'class_name' => $c['name'],
+                'marked' => $count > 0
+            ];
+        }
+
+        $this->json([
+            'ok' => true,
+            'data' => [
+                'date' => $today,
+                'user' => [
+                    'id' => $teacherId,
+                    'role' => $this->role()
+                ],
+                'my_classes' => $classes,
+                'my_subjects' => $subjects,
+                'attendance_today' => $attendanceToday
+            ]
+        ]);
     }
 }
