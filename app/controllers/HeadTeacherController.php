@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/BaseController.php';
 require_once __DIR__ . '/../models/Teacher.php';
-require_once __DIR__ . '/../models/exam.php';
+require_once __DIR__ . '/../models/Exam.php';
 
 class HeadTeacherController extends BaseController
 {
